@@ -1,0 +1,87 @@
+# Python code (running on your computer)
+
+import cv2
+import serial
+import time
+
+arduino_port = 'COM5'  # ADJUST AS NEEDED
+baud_rate = 9600
+
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+
+pan_min = 0; pan_max = 180
+tilt_min = 0; tilt_max = 180
+pan_center = 90; tilt_center = 90
+
+pan_kp = 0.3; pan_ki = 0.005; pan_kd = 0.05  # ADJUST PID
+tilt_kp = 0.3; tilt_ki = 0.005; tilt_kd = 0.05 # ADJUST PID
+
+pan_last_error = 0; pan_integral = 0
+tilt_last_error = 0; tilt_integral = 0
+
+def constrain(val, min_val, max_val):
+    return max(min(val, max_val), min_val)
+
+def pid(error, last_error, integral, kp, ki, kd):
+    integral += error
+    derivative = error - last_error
+    output = kp * error + ki * integral + kd * derivative
+    return output, error, integral
+
+try:
+    arduino = serial.Serial(arduino_port, baud_rate, timeout=0.1)
+    print(f"Connected to Arduino on {arduino_port}")
+except serial.SerialException as e:
+    print(f"Error: {e}")
+    exit()
+
+cap = cv2.VideoCapture(0)
+if not cap.isOpened():
+    print("Error: Camera.")
+    exit()
+
+pan_angle = pan_center; tilt_angle = tilt_center
+arduino.write(f"{pan_angle},{tilt_angle}\n".encode())
+time.sleep(1)
+
+while True:
+    ret, frame = cap.read()
+    if not ret: break
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(30, 30))
+
+    if faces is not None and len(faces) > 0:
+        x, y, w, h = faces[0]
+        cx = x + w // 2
+        cy = y + h // 2
+        fw = frame.shape[1] // 2
+        fh = frame.shape[0] // 2
+
+        pan_error = fw - cx
+        tilt_error = fh - cy
+
+        pan_output, pan_last_error, pan_integral = pid(pan_error, pan_last_error, pan_integral, pan_kp, pan_ki, pan_kd)
+        pan_angle += int(pan_output * 0.1)
+        pan_angle = constrain(pan_angle, pan_min, pan_max)
+
+        tilt_output, tilt_last_error, tilt_integral = pid(tilt_error, tilt_last_error, tilt_integral, tilt_kp, tilt_ki, tilt_kd)
+        tilt_angle -= int(tilt_output * 0.1) # Subtracted for typical tilt direction
+        tilt_angle = constrain(tilt_angle, tilt_min, tilt_max)
+
+        try:
+            arduino.write(f"{pan_angle},{tilt_angle}\n".encode())
+        except serial.SerialException as e:
+            print(f"Serial error: {e}")
+
+        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        cv2.circle(frame, (cx, cy), 5, (255, 0, 0), -1)
+        cv2.circle(frame, (fw, fh), 5, (0, 0, 255), -1)
+
+    cv2.imshow("Face Tracking", frame)
+    if cv2.waitKey(1) & 0xFF == ord('q'): break
+
+cap.release()
+cv2.destroyAllWindows()
+if 'arduino' in locals() and arduino.is_open:
+    arduino.close()
+    print("Serial closed.")
