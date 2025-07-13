@@ -1,0 +1,52 @@
+#include <Servo.h>
+
+Servo panServo;
+Servo tiltServo;
+Servo tttrigger;
+
+const int panPin = 9;
+const int tiltPin = 10;
+const int triggerPin = 6;
+
+int panSpeed = 0;
+int tiltSpeed = 0;
+
+void setup() {
+    Serial.begin(9600);
+    panServo.attach(panPin);
+    tiltServo.attach(tiltPin);
+    tttrigger.attach(triggerPin);
+    tttrigger.write(60);  // ✅ Changed: start at 90 (reversed idle)
+}
+
+void controlServo(Servo &servo, int speed) {
+    if (speed == 0) {
+        servo.write(90);
+    } else if (speed > 0) {
+        servo.write(map(speed, 0, 100, 91, 180));
+    } else {
+        servo.write(map(speed, -100, 0, 0, 89));
+    }
+}
+
+void loop() {
+    if (Serial.available()) {
+        String input = Serial.readStringUntil('\n');
+
+        if (input.startsWith("T")) {
+            // ✅ Reversed trigger: now it moves to 0, then back to 90
+            tttrigger.write(80);     // Trigger ON (reversed)
+            delay(500);
+            tttrigger.write(60);    // Back to rest
+        } else {
+            int commaIndex = input.indexOf(',');
+            if (commaIndex > 0) {
+                panSpeed = input.substring(0, commaIndex).toInt();
+                tiltSpeed = input.substring(commaIndex + 1).toInt();
+
+                controlServo(panServo, panSpeed);
+                controlServo(tiltServo, tiltSpeed);
+            }
+        }
+    }
+}
